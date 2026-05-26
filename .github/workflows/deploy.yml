@@ -1,0 +1,38 @@
+name: Deploy to AWS EC2
+
+on:
+  push:
+    branches:
+      - main  # main 브랜치에 코드가 머지되면 자동으로 작동합니다.
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: GitHub Actions 로봇이 최신 코드 가져오기
+        uses: actions/checkout@v4
+
+      - name: AWS EC2 서버에 SSH로 접속해서 자동 배포 진행
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          script: |
+            # 1. 내 서버 프로젝트 폴더로 이동 (폴더 이름이 다르면 수정 필요!)
+            cd ~/cow-ir-server
+            
+            # 2. GitHub 최신 코드로 서버 동기화
+            git pull origin main
+            
+            # 3. 서버 가상환경 켜고 패키지 최신화
+            source venv/bin/activate
+            pip install -r requirements.txt
+            
+            # 4. 기존 서버 안전하게 끄기
+            pkill -f uvicorn || true
+            
+            # 5. 백그라운드에서 FastAPI 서버 가동
+            nohup uvicorn main:app --host 0.0.0.0 --port 8000 > app.log 2>&1 &
