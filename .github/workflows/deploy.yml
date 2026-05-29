@@ -1,0 +1,29 @@
+name: Deploy to AWS EC2
+
+on:
+  push:
+    branches:
+      - main  # main 브랜치에 코드가 합쳐질 때(Merge) 작동합니다.
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: GitHub Actions 로봇이 최신 코드 가져오기
+        uses: actions/checkout@v4
+
+      - name: AWS EC2 서버에 SSH로 접속해서 자동 배포 진행
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          script: |
+            cd ~/cow-ir-server
+            git pull origin main
+            source venv/bin/activate
+            pip install -r requirements.txt
+            pkill -f uvicorn || true
+            nohup uvicorn main:app --host 0.0.0.0 --port 8000 > app.log 2>&1 &
