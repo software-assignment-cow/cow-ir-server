@@ -1,80 +1,78 @@
+# image_processing.py
+
 import cv2
 import numpy as np
 
 
-def read_image_from_bytes(image_bytes: bytes):
+def calculate_similarity(uploaded_image_bytes, registered_image_bytes):
     """
-    이미지 bytes를 OpenCV 이미지로 변환한다.
-    webp, png, jpg, jpeg 등을 처리할 수 있다.
+    [B, C 담당 영역]
+    업로드된 소 비문 이미지와 등록된 소 비문 이미지를
+    OpenCV ORB + BFMatcher 방식으로 비교하여
+    0~100 사이의 유사도 점수를 반환한다.
     """
-    if image_bytes is None or len(image_bytes) == 0:
-        raise ValueError("이미지 데이터가 비어 있습니다.")
 
-    np_arr = np.frombuffer(image_bytes, np.uint8)
-    image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+    print("OpenCV 이미지 비교 엔진 가동 중...")
 
-    if image is None:
-        raise ValueError("이미지를 읽을 수 없습니다. 지원하지 않는 형식이거나 손상된 파일입니다.")
+    # 1. 입력 이미지 bytes 검증
+    if uploaded_image_bytes is None or len(uploaded_image_bytes) == 0:
+        raise ValueError("업로드 이미지 데이터가 비어 있습니다.")
 
-    return image
+    if registered_image_bytes is None or len(registered_image_bytes) == 0:
+        raise ValueError("등록 이미지 데이터가 비어 있습니다.")
 
+    # 2. bytes 데이터를 numpy 배열로 변환
+    uploaded_np = np.frombuffer(uploaded_image_bytes, np.uint8)
+    registered_np = np.frombuffer(registered_image_bytes, np.uint8)
 
-def preprocess_image(image, size=(512, 512)):
-    """
-    ORB 비교를 위한 이미지 전처리 함수.
-    grayscale 변환, resize, 대비 보정을 수행한다.
-    """
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    resized = cv2.resize(gray, size)
+    # 3. numpy 배열을 OpenCV 이미지로 변환
+    uploaded_image = cv2.imdecode(uploaded_np, cv2.IMREAD_COLOR)
+    registered_image = cv2.imdecode(registered_np, cv2.IMREAD_COLOR)
 
-    # 대비 보정
-    equalized = cv2.equalizeHist(resized)
+    if uploaded_image is None:
+        raise ValueError("업로드 이미지를 읽을 수 없습니다.")
 
-    return equalized
+    if registered_image is None:
+        raise ValueError("등록 이미지를 읽을 수 없습니다.")
 
+    # 4. grayscale 변환
+    uploaded_gray = cv2.cvtColor(uploaded_image, cv2.COLOR_BGR2GRAY)
+    registered_gray = cv2.cvtColor(registered_image, cv2.COLOR_BGR2GRAY)
 
-def extract_orb_features(image):
-    """
-    ORB 특징점과 descriptor를 추출한다.
-    """
+    # 5. resize 처리
+    target_size = (512, 512)
+    uploaded_resized = cv2.resize(uploaded_gray, target_size)
+    registered_resized = cv2.resize(registered_gray, target_size)
+
+    # 6. 대비 보정
+    uploaded_equalized = cv2.equalizeHist(uploaded_resized)
+    registered_equalized = cv2.equalizeHist(registered_resized)
+
+    # 7. ORB 특징점 추출
     orb = cv2.ORB_create(
         nfeatures=1000,
         scaleFactor=1.2,
         nlevels=8
     )
 
-    keypoints, descriptors = orb.detectAndCompute(image, None)
+    uploaded_keypoints, uploaded_descriptors = orb.detectAndCompute(
+        uploaded_equalized,
+        None
+    )
 
-    return keypoints, descriptors
+    registered_keypoints, registered_descriptors = orb.detectAndCompute(
+        registered_equalized,
+        None
+    )
 
-
-def calculate_similarity(uploaded_image_bytes: bytes, registered_image_bytes: bytes) -> float:
-    """
-    업로드 이미지와 등록된 소 비문 이미지를 비교해서 0~100 사이 유사도 점수를 반환한다.
-
-    Args:
-        uploaded_image_bytes: 프론트엔드에서 업로드된 소 비문 이미지 bytes
-        registered_image_bytes: Supabase Storage에서 가져온 등록 소 비문 이미지 bytes
-
-    Returns:
-        float: 0.0 ~ 100.0 사이 유사도 점수.
-               100에 가까울수록 더 유사하다.
-    """
-    uploaded_image = read_image_from_bytes(uploaded_image_bytes)
-    registered_image = read_image_from_bytes(registered_image_bytes)
-
-    processed_uploaded = preprocess_image(uploaded_image)
-    processed_registered = preprocess_image(registered_image)
-
-    uploaded_keypoints, uploaded_descriptors = extract_orb_features(processed_uploaded)
-    registered_keypoints, registered_descriptors = extract_orb_features(processed_registered)
-
+    # 특징점이 없으면 비교 불가
     if uploaded_descriptors is None or registered_descriptors is None:
         return 0.0
 
     if len(uploaded_keypoints) == 0 or len(registered_keypoints) == 0:
         return 0.0
 
+    # 8. BFMatcher로 descriptor 매칭
     matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
     matches = matcher.match(uploaded_descriptors, registered_descriptors)
 
@@ -84,6 +82,7 @@ def calculate_similarity(uploaded_image_bytes: bytes, registered_image_bytes: by
     # distance가 낮을수록 더 좋은 매칭
     good_matches = [match for match in matches if match.distance < 60]
 
+    # 9. similarity score 계산
     base_count = min(len(uploaded_keypoints), len(registered_keypoints))
 
     if base_count == 0:
@@ -92,6 +91,7 @@ def calculate_similarity(uploaded_image_bytes: bytes, registered_image_bytes: by
     score = len(good_matches) / base_count
     score = max(0.0, min(score, 1.0))
 
+    # 0~1 점수를 0~100 점수로 변환
     score_percent = score * 100
 
     return round(score_percent, 2)
