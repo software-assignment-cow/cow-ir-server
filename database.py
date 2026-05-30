@@ -15,7 +15,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # 1. Pydantic V2 모델 정의
 class RegisteredCow(BaseModel):
-    id: int
+    id: str  # 🛠️ UUID 문자열 형식을 지원하기 위해 str로 변경 (Validation Error 해결)
     name: str
     birth_date: date = Field(..., alias="birth_date")
     nose_image_path: str = Field(..., alias="nose_image_path")
@@ -36,8 +36,13 @@ async def get_registered_cows_with_images() -> List[RegisteredCow]:
             full_path = record.get("nose_image_path")
             if not full_path:
                 continue
-                
-            file_path = full_path.replace(f"{bucket_name}/", "") if full_path.startswith(bucket_name) else full_path
+            
+            # 🛠️ Storage 경로 불일치(Object not found) 해결 로직
+            # DB에 어떤 형식으로 주소가 저장되어 있든, 버킷명 뒤의 순수 파일 경로만 잘라냅니다.
+            if f"{bucket_name}/" in full_path:
+                file_path = full_path.split(f"{bucket_name}/")[-1]
+            else:
+                file_path = full_path
 
             try:
                 # Storage에서 이미지 다운로드 (bytes 반환)
@@ -45,7 +50,7 @@ async def get_registered_cows_with_images() -> List[RegisteredCow]:
                 
                 # Pydantic 모델에 데이터 매핑
                 cow_obj = RegisteredCow(
-                    id=record["id"],
+                    id=str(record["id"]), # UUID 객체일 경우를 대비해 안전하게 str 변환
                     name=record["name"],
                     birth_date=record["birth_date"],
                     nose_image_path=full_path,
