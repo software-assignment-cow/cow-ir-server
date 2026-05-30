@@ -1,47 +1,96 @@
+import cv2
+import numpy as np
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
-#  1, 2단계에서 새로 만든 분리된 방(파일)들로부터 함수 불러오기!
-from image_processing import calculate_similarity
+# 🎯 변경 포인트: test_supabase 대신 프로젝트 공통 구조인 database에서 임포트하도록 수정
 from database import get_registered_cows_with_images
 
-app = FastAPI()
+app = FastAPI(title="소 비문 식별 MVP API")
 
-# 프론트엔드 배포 주소 CORS 허용
+# 프론트엔드(React) 연동을 위한 CORS 설정
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://cow-ir-client.netlify.app","http://localhost:5173"], # 프론트 주소 생기면 여기에 적어주기
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# OpenCV ORB 기반 이미지 유사도 계산 함수
+def calculate_similarity(uploaded_bytes: bytes, registered_bytes: bytes) -> float:
+    try:
+        nparr_up = np.frombuffer(uploaded_bytes, np.uint8)
+        img_uploaded = cv2.imdecode(nparr_up, cv2.IMREAD_GRAYSCALE)
+
+        nparr_reg = np.frombuffer(registered_bytes, np.uint8)
+        img_registered = cv2.imdecode(nparr_reg, cv2.IMREAD_GRAYSCALE)
+
+        if img_uploaded is None or img_registered is None:
+            return 0.0
+
+        orb = cv2.ORB_create(nfeatures=1000)
+        kp1, des1 = orb.detectAndCompute(img_uploaded, None)
+        kp2, des2 = orb.detectAndCompute(img_registered, None)
+
+        if des1 is None or des2 is None:
+            return 0.0
+
+        bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+        matches = bf.match(des1, des2)
+
+        if not matches:
+            return 0.0
+
+        good_matches = [m for m in matches if m.distance < 50]
+        total_features = min(len(kp1), len(kp2))
+        
+        if total_features == 0:
+            return 0.0
+            
+        score = (len(good_matches) / total_features) * 100
+        return round(score, 2)
+
+    except Exception as e:
+        print(f"⚠️ OpenCV 처리 중 오류 발생: {e}")
+        return 0.0
+
+# 비문 매칭 API 엔드포인트
 @app.post("/recognize")
-async def recognize_cow(image: UploadFile = File(...)):
+async def recognize(image: UploadFile = File(...)):
     file_bytes = await image.read()
-    print(f"🎯 프론트로부터 수신된 비문 파일명: {image.filename}")
     
-    # 2. Supabase 방(database.py)에서 소 목록 가져오기
-    cows = get_registered_cows()
+    # database.py 모듈로부터 등록된 소 목록 비동기로 가져오기
+    cows = await get_registered_cows_with_images()
     
-    # [피드백 반영] 빈 배열(데이터가 없을 때) 케이스 방어하기!
-    if not cows:  # 소 목록이 텅 비어있다면(빈 리스트라면)
-        return {
-            "name": "등록된 소 없음",
-            "birthDate": "",
-            "imageUrl": "",
-            "score": 0.0,
-            "message": "데이터베이스에 등록된 소 정보가 존재하지 않습니다."
-        }
+    if not cows:
+        return {"error": "등록된 소 데이터를 가져오지 못했습니다."}
+        
+    best_cow = None
+    max_score = -1.0
     
-    # 3. OpenCV 방(image_processing.py)에서 비교 연산 돌리기
-    mock_registered_bytes = b"sample_bytes"
-    final_score = calculate_similarity(file_bytes, mock_registered_bytes)
+    # 1:N 매칭 반복문 진행
+    for cow in cows:
+        score = calculate_similarity(file_bytes, cow.image_bytes)
+        if score > max_score:
+            max_score = score
+            best_cow = cow
+            
+    if best_cow is None:
+        return {"error": "비교 대상을 찾을 수 없습니다."}
+        
+    # Supabase 스토리지의 Public 이미지 조회를 위한 URL 빌드
+    supabase_project_id = "lrxfzrbxobabevoyzuko"
+    public_url = f"https://{supabase_project_id}.supabase.co/storage/v1/object/public/{best_cow.nose_image_path}"
     
-    # 4. 최종 조립된 결과를 프론트엔드로 반환!
+    # 기획서 규격 JSON 반환
     return {
-        "name": cows[0]["name"],         
-        "birthDate": cows[0]["birth_date"],
-        "imageUrl": "https://example.com/test.webp",
-        "score": final_score             
+        "name": best_cow.name,
+        "birthDate": str(best_cow.birth_date),
+        "imageUrl": public_url,
+        "score": int(max_score)
     }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
