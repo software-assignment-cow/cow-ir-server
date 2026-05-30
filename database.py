@@ -15,7 +15,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # 1. Pydantic V2 모델 정의
 class RegisteredCow(BaseModel):
-    id: str  # 🛠️ [해결 1] int에서 str로 변경하여 UUID 문자열 형식 지원 (Validation Error 해결)
+    id: str  # 🛠️ UUID 문자열 형식을 지원하기 위해 str로 변경 (Validation Error 해결)
     name: str
     birth_date: date = Field(..., alias="birth_date")
     nose_image_path: str = Field(..., alias="nose_image_path")
@@ -37,9 +37,8 @@ async def get_registered_cows_with_images() -> List[RegisteredCow]:
             if not full_path:
                 continue
             
-            # 🛠️ [해결 2] 경로 불일치(404 Object not found) 완벽 방어 로직
-            # DB에 전체 URL(https://...)이나 버킷명이 포함된 경로가 들어있어도
-            # 'cow-noseprints/' 뒷부분의 순수 파일명/경로만 깔끔하게 잘라냅니다.
+            # 🛠️ Storage 경로 불일치(Object not found) 해결 로직
+            # DB에 어떤 형식으로 주소가 저장되어 있든, 버킷명 뒤의 순수 파일 경로만 잘라냅니다.
             if f"{bucket_name}/" in full_path:
                 file_path = full_path.split(f"{bucket_name}/")[-1]
             else:
