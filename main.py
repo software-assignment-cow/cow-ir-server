@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 #  1, 2단계에서 새로 만든 분리된 방(파일)들로부터 함수 불러오기!
 from image_processing import calculate_similarity
-from database import get_registered_cows
+from database import get_registered_cows_with_images
 
 app = FastAPI()
 
