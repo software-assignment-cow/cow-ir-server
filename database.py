@@ -8,10 +8,18 @@ from supabase import create_client, Client
 # 환경 변수 로드 (.env 파일 사용)
 load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY")
+COW_NOSEPRINT_BUCKET = "cow-noseprints"
 
 # Supabase 클라이언트 초기화
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+
+def get_cow_noseprint_file_path(path: str) -> str:
+    if f"{COW_NOSEPRINT_BUCKET}/" in path:
+        return path.split(f"{COW_NOSEPRINT_BUCKET}/")[-1]
+
+    return path
 
 # 1. Pydantic V2 모델 정의
 class RegisteredCow(BaseModel):
@@ -30,8 +38,6 @@ async def get_registered_cows_with_images() -> List[RegisteredCow]:
         cow_records = response.data
 
         registered_cows: List[RegisteredCow] = []
-        bucket_name = "cow-noseprints"
-
         for record in cow_records:
             full_path = record.get("nose_image_path")
             if not full_path:
@@ -39,14 +45,11 @@ async def get_registered_cows_with_images() -> List[RegisteredCow]:
             
             # 🛠️ Storage 경로 불일치(Object not found) 해결 로직
             # DB에 어떤 형식으로 주소가 저장되어 있든, 버킷명 뒤의 순수 파일 경로만 잘라냅니다.
-            if f"{bucket_name}/" in full_path:
-                file_path = full_path.split(f"{bucket_name}/")[-1]
-            else:
-                file_path = full_path
+            file_path = get_cow_noseprint_file_path(full_path)
 
             try:
                 # Storage에서 이미지 다운로드 (bytes 반환)
-                image_data = supabase.storage.from_(bucket_name).download(file_path)
+                image_data = supabase.storage.from_(COW_NOSEPRINT_BUCKET).download(file_path)
                 
                 # Pydantic 모델에 데이터 매핑
                 cow_obj = RegisteredCow(
