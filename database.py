@@ -10,6 +10,7 @@ load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY")
 COW_NOSEPRINT_BUCKET = "cow-noseprints"
+COW_NOSEPRINT_SIGNED_URL_EXPIRES_IN_SECONDS = 60 * 60
 
 # Supabase 클라이언트 초기화
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -20,6 +21,29 @@ def get_cow_noseprint_file_path(path: str) -> str:
         return path.split(f"{COW_NOSEPRINT_BUCKET}/")[-1]
 
     return path
+
+
+def create_cow_noseprint_signed_url(path: str) -> str:
+    file_path = get_cow_noseprint_file_path(path)
+    response = supabase.storage.from_(COW_NOSEPRINT_BUCKET).create_signed_url(
+        file_path,
+        COW_NOSEPRINT_SIGNED_URL_EXPIRES_IN_SECONDS,
+    )
+
+    if isinstance(response, dict):
+        return (
+            response.get("signedURL")
+            or response.get("signedUrl")
+            or response.get("signed_url")
+            or ""
+        )
+
+    return (
+        getattr(response, "signedURL", None)
+        or getattr(response, "signedUrl", None)
+        or getattr(response, "signed_url", None)
+        or ""
+    )
 
 # 1. Pydantic V2 모델 정의
 class RegisteredCow(BaseModel):
