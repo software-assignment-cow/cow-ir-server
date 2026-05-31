@@ -2,9 +2,7 @@ from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from database import (
-    COW_NOSEPRINT_BUCKET,
-    SUPABASE_URL,
-    get_cow_noseprint_file_path,
+    create_cow_noseprint_signed_url,
     get_registered_cows_with_images,
 )
 from image_processing import calculate_similarity
@@ -25,11 +23,6 @@ class CowRecognitionResponse(BaseModel):
     birthDate: str
     imageUrl: str
     score: int
-
-
-def create_cow_noseprint_public_url(path: str) -> str:
-    file_path = get_cow_noseprint_file_path(path)
-    return f"{SUPABASE_URL}/storage/v1/object/public/{COW_NOSEPRINT_BUCKET}/{file_path}"
 
 
 @app.post("/recognize", response_model=CowRecognitionResponse)
@@ -64,7 +57,7 @@ async def recognize_cow(image: UploadFile = File(...)):
             "score": int(best_score)
         }
 
-    image_url = create_cow_noseprint_public_url(best_cow.nose_image_path)
+    image_url = create_cow_noseprint_signed_url(best_cow.nose_image_path)
 
     return {
         "name": best_cow.name,
